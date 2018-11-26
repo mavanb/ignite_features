@@ -50,6 +50,7 @@ class VisPlotter:
                 assert all(isinstance(item, str) for item in metric), \
                     "If input_type is multiple, metric should be a list of str."
                 assert 1 < len(metric), "If input_type is multiple, metric should contain 2 or more metrics."
+                self.metric = metric
             else:
                 raise ValueError("Unknown input type, should be either: single, array or multiple.")
 
@@ -101,7 +102,7 @@ class VisPlotter:
                     # apply the given transformation to the metric
                     y = self.transform(y_raw)
 
-                    assert isinstance(y, np.float64) or isinstance(y, float), \
+                    assert isinstance(y, float), \
                         "Y value should after transform be a float"
 
                     y_list.append(y)
@@ -115,7 +116,7 @@ class VisPlotter:
                 # apply the given transformation to the metric
                 y = self.transform(y_raw)
 
-                assert isinstance(y, np.float64) or isinstance(y, float), \
+                assert isinstance(y, float) or y.dtype == np.float, \
                     "Y value should after transform be a float"
 
                 if self.input_type == "single":
@@ -125,7 +126,7 @@ class VisPlotter:
                 else:
 
                     assert y.shape == (self.num_lines,), "Array length should equal the number of lines."
-                    Y = y
+                    Y = y.reshape(1, -1)
 
             # update plot
             self.vis.line(env=self.env, X=X, Y=Y, win=self.win, update='append', opts=self.legend)

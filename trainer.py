@@ -260,8 +260,12 @@ class Trainer:
             # start visdom if in conf
             if self.conf.start_visdom:
 
+                vis = visdom.Visdom()
+
+                time.sleep(1)
+
                 # if visdom connection exists kill it
-                if self.vis.check_connection():
+                if vis.check_connection():
                     self._log.info("Existing visdom connection found. Killed it.")
 
                     # kill process with process name containing 'visdom.server'.
@@ -282,9 +286,6 @@ class Trainer:
 
                 proc = Popen([f"{sys.executable}", "-m", "visdom.server", "-env_path",
                               self.conf.exp_path, "-port", str(port), "-logging_level", "50"])
-                time.sleep(1)
-
-                vis = visdom.Visdom()
 
                 retries = 0
                 while (not vis.check_connection()) and retries < 10:
