@@ -11,6 +11,7 @@ import time
 import sys
 import os
 import socket
+import errno
 import logging
 from subprocess import Popen
 import numpy as np
@@ -82,6 +83,7 @@ class Trainer:
         self.optimizer = optimizer
         self.conf = conf
         self.device = get_device()
+        self.used_port = None
 
         self._log = get_logger(__name__)
 
@@ -260,44 +262,53 @@ class Trainer:
             # start visdom if in conf
             if self.conf.start_visdom:
 
-                vis = visdom.Visdom()
-
-                time.sleep(1)
-
-                # if visdom connection exists kill it
-                if vis.check_connection():
-                    self._log.info("Existing visdom connection found. Killed it.")
-
-                    # kill process with process name containing 'visdom.server'.
-                    Popen(["pkill", "-f", ".*visdom\.server.*"])
-                else:
-                    self._log.info("No visdom connection found. Starting visdom.")
-
                 # create visdom enviroment path if not exists
                 if not os.path.exists(self.conf.exp_path):
                     os.makedirs(self.conf.exp_path)
 
+                # find free port
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     port = 8097
-                    while s.connect_ex(('localhost', port)) == 0:
-                        port += 1
-                        if port == 8999:
+                    while port < 8999:
+                        try:
+                            s.bind(("127.0.0.1", port))
                             break
+                        except socket.error as e:
+                            if e.errno == errno.EADDRINUSE:
+                                self._log.info(f"Port {port} is already in use")
+                                port += 1
+                            else:
+                                self._log.error(e)
 
                 proc = Popen([f"{sys.executable}", "-m", "visdom.server", "-env_path",
-                              self.conf.exp_path, "-port", str(port), "-logging_level", "50"])
+                                  self.conf.exp_path, "-port", str(port), "-logging_level", "50"])
+                time.sleep(1)
+
+                def start_visdom():
+                    try:
+                        # connection to free port
+                        vis = visdom.Visdom(raise_exceptions=True, port=port)
+                        return vis.check_connection(), vis, port
+                    except:
+                        return False, None, None
 
                 retries = 0
-                while (not vis.check_connection()) and retries < 10:
+                while retries < 10:
+                    success, vis, port = start_visdom()
+                    if success:
+                        self.used_port = port
+                        break
                     retries += 1
-                    time.sleep(1)
+                    time.sleep(retries)
 
-                if not vis.check_connection():
+                if vis and vis.check_connection():
+                    self._log.info(f"Successfully started visdom connection.")
+                else:
                     raise RuntimeError("Could not start Visdom")
 
             # if use existing connection
             else:
-                vis = visdom.Visdom()
+                vis = visdom.Visdom(env=self.conf.model_name, log_to_filename=os.path.join(self.conf.exp_path, self.conf.model_name, ".json"))
 
                 if vis.check_connection():
                     self._log.info("Use existing Visdom connection")
@@ -312,7 +323,15 @@ class Trainer:
 
     def run(self):
         """ Start the training process. """
-        self.train_engine.run(self.train_loader, max_epochs=self.conf.epochs)
+        try:
+            self.train_engine.run(self.train_loader, max_epochs=self.conf.epochs)
+        finally:
+            if self.conf.start_visdom and self.used_port:
+                # kill the started process
+                self._log.info(f"Closing used connection on port {self.used_port}")
+                Popen(["pkill", "-f", f".*visdom\.server.*port.{self.used_port}"])
+            elif self.conf.start_visdom:
+                self._log.warning("Visdom connection might be started, but not closed.")
 
     def _add_custom_events(self):
         pass
